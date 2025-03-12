@@ -1,0 +1,13 @@
+[project]
+name = "portfoliolens"
+version = "0.1.0"
+description = "Suggesting the ability to look deeply into my work experience"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.2.1",
+    "fastapi[standard]>=0.115.11",
+    "pydantic-settings>=2.8.1",
+    "sentence-transformers>=3.4.1",
+    "uvicorn>=0.34.0",
+]
