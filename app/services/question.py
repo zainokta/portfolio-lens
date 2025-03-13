@@ -33,21 +33,27 @@ class QuestionService():
         
         return [content[0] for content in results]
 
-    def answer(self, user_query: str):
-        relevant_contexts = self.search_portfolio(user_query)
+    def answer(self, relevant_contexts, user_query: str):
+        if not relevant_contexts:
+            return "I don't have information on that topic."
+    
         context_text = "\n\n".join(relevant_contexts)
 
         messages = [
-        {"role": "system", "content": """You are an AI assistant that provides detailed and well-structured answers about my portfolio.
-        
-            - If the query is related to my experience, skills, or projects, extract relevant information from the provided context and elaborate on it.
-            - If multiple topics are mentioned, try to address each one clearly.
-            - If a direct answer is not available, make a logical connection based on the given context rather than saying "I cannot answer."
-            - If needed, provide insights about my contributions, challenges faced, and the impact of my work.
-            - Don't mention about from "context provided", or "from the portfolio".
-            - Act as you are my assistant answering someone who asks about my related experience, skills, or projects. Answer the question asked as the third party and calling my name "Zain".
-            """},
-            {"role": "user", "content": f"Here is relevant information from my portfolio:\n\n{context_text}\n\nBased on this, please provide a detailed response to the following query:\n\n{user_query}"}
+        {"role": "system", "content": """You are an AI assistant helping answer questions about Zain's portfolio, experience, skills, and projects.  
+
+            - **Only** answer questions that are directly related to Zain's portfolio, work experience, technical skills, or projects.  
+            - If a question is **not** relevant (e.g., personal life, hobbies, pet names), respond with: **"I only provide information about Zain's professional experience, skills, and projects."**  
+            - If multiple topics are mentioned, answer only the ones relevant to Zain's work and experience. Ignore unrelated topics.  
+            - If no useful information is found in the context, say: **"I don't have information on that topic."** Do **not** attempt to infer or generate unrelated details.  
+            - If the provided context contains **partially relevant** information, use only the parts that are useful and ignore the rest.  
+            - Never mention "from the context provided" or "from the portfolio." Instead, answer naturally as Zain's assistant.  
+            - Structure responses clearly, making them easy to understand.  
+
+            **Reminder:** Strictly avoid answering anything unrelated to Zain's professional background. If unsure, default to: **"I only provide information about Zain's professional experience, skills, and projects."**  
+
+        """},
+        {"role": "user", "content": f"Here is relevant information from my portfolio:\n\n{context_text}\n\nBased on this, please provide a detailed response to the following query:\n\n{user_query}"}
         ]
 
         output = llm.invoke(messages)

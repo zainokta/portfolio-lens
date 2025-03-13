@@ -10,4 +10,4 @@ question_router = APIRouter(prefix="/api/question", tags=["question"])
 def query_question(request: Question, service: QuestionService):
     relevant_contexts = service.search_portfolio(request.query)
 
-    return service.answer(relevant_contexts)
+    return service.answer(relevant_contexts, request.query)
