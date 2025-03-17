@@ -1,8 +1,15 @@
 import duckdb
 import json
-from sentence_transformers import SentenceTransformer
+from langchain_openai import OpenAIEmbeddings
+import getpass
+import os
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = getpass.getpass("Enter your OpenAI API key: ")
+
+embedding_model = OpenAIEmbeddings(
+    model="text-embedding-3-large",
+)
 
 conn = duckdb.connect(database="portfolio.db")
 
@@ -13,7 +20,7 @@ portfolio_chunks = []
 with open('backfill.json') as json_data:
     portfolio_chunks = json.load(json_data)
 
-embeddings = model.encode(portfolio_chunks)
+embeddings = embedding_model.embed_documents(portfolio_chunks)
 
 conn.execute("""
 CREATE TABLE portfolio_content (
@@ -26,5 +33,6 @@ CREATE TABLE portfolio_content (
 for i, (content, embedding) in enumerate(zip(portfolio_chunks, embeddings)):
     conn.execute(
         "INSERT INTO portfolio_content VALUES (?, ?, ?)",
-        [i, content, embedding.tolist()]
+        [i, content, embedding]
     )
+conn.close()

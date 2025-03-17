@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.api.routes.question import question_router
-from app.database.database import conn, model
+from app.database.database import conn
+from app.api.middleware import limiter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,6 +31,8 @@ def create_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    application.state.limiter = limiter
     
     # Include routers
     application.include_router(question_router)

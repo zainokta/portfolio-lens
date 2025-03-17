@@ -12,3 +12,5 @@ wheels/
 .env
 backfill.json
 *.db
+
+prompt.txt
