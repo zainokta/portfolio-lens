@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -15,12 +15,16 @@ async def lifespan(app: FastAPI):
     conn.close()
 
 def create_application() -> FastAPI:
+    # Conditionally set docs URLs - disable in production
+    docs_url = None if settings.is_production else "/docs"
+    redoc_url = None if settings.is_production else "/redoc"
+    
     application = FastAPI(
         title=settings.project_name,
         description=settings.project_description,
         version=settings.version,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
         lifespan=lifespan
     )
     

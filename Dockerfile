@@ -46,8 +46,16 @@ WORKDIR /app
 # Copy application source files
 COPY . .
 
+# Copy required data files (even though they're in .gitignore)
+COPY backfill.json ./
+COPY prompt.txt ./
+COPY .env ./
+
+# Run backfill script to initialize database
+RUN python script/backfill.py
+
 # Expose FastAPI default port
 EXPOSE 8000
 
-# Run FastAPI application
-CMD ["uv", "run", "main.py"]
+# Start the application
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
