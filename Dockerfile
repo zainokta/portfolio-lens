@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies
-FROM debian:bookworm-slim AS builder
+FROM python:3.12-slim AS builder
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -7,52 +7,50 @@ ENV PYTHONUNBUFFERED=1 \
     UV_NO_CACHE=1 \
     PATH="/root/.local/bin:$PATH"
 
-# Install dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv curl && \
+    gcc g++ curl ca-certificates && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Set working directory
 WORKDIR /app
 
 # Copy dependency file and install packages
 COPY pyproject.toml ./
-RUN uv sync
+RUN uv sync --no-dev
+
+# Clean up build dependencies in same layer
+RUN apt-get purge -y gcc g++ && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Runtime image
-FROM debian:bookworm-slim
+FROM python:3.12-slim
+
+# Create a non-root user and group
+RUN groupadd -r appuser && useradd --no-create-home -r -g appuser appuser
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1 \
-    UV_NO_CACHE=1 \
-    PATH="/root/.local/bin:$PATH"
-
-# Install only necessary runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Copy installed dependencies from the builder stage
-COPY --from=builder /usr/local/lib/python3.*/site-packages /usr/local/lib/python3.*/site-packages
-COPY --from=builder /root/.local /root/.local
+    PATH="/app/.venv/bin:$PATH"
 
 # Set working directory
 WORKDIR /app
 
-# Copy application source files
-COPY . .
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
 
-# Copy required data files (even though they're in .gitignore)
-COPY backfill.json ./
-COPY prompt.txt ./
-COPY .env ./
+# Copy application files
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser main.py ./
+COPY --chown=appuser:appuser .env ./
+COPY --chown=appuser:appuser portfolio.db ./
+COPY --chown=appuser:appuser prompt.txt ./
 
-# Run backfill script to initialize database
-RUN python script/backfill.py
+# Switch to the non-root user
+USER appuser
 
 # Expose FastAPI default port
 EXPOSE 8000

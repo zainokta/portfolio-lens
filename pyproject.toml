@@ -10,7 +10,7 @@ dependencies = [
     "langchain-community>=0.3.19",
     "langchain-openai>=0.3.8",
     "pydantic-settings>=2.8.1",
-    "sentence-transformers>=3.4.1",
+    "python-dotenv>=1.0.0",
     "slowapi>=0.1.9",
     "uvicorn>=0.34.0",
 ]

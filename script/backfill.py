@@ -1,9 +1,10 @@
 import duckdb
 import json
 from langchain_openai import OpenAIEmbeddings
-import getpass
 import os
+import duckdb
 from typing import List, Dict
+from dotenv import load_dotenv
 
 def load_portfolio_data() -> List[str]:
     """Load and structure portfolio data from JSON file."""
@@ -61,8 +62,11 @@ def categorize_content(content: str) -> Dict[str, str]:
 
 def main():
     """Main function to populate the portfolio database."""
+    # Load environment variables from .env file
+    load_dotenv()
+    
     if not os.getenv("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = getpass.getpass("Enter your OpenAI API key: ")
+        raise ValueError("OPENAI_API_KEY environment variable is required. Please set it in your .env file.")
     
     embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-large",
