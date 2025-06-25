@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+    
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        """Parse allowed_origins string into a list for CORS middleware."""
+        if self.allowed_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.allowed_origins.split(",")]
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE_PATH),

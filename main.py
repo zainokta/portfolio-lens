@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from app.core.config import settings
 from app.api.routes.question import question_router
 from app.database.database import conn
 from app.api.middleware import limiter
+from dotenv import load_dotenv
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,13 +32,23 @@ def create_application() -> FastAPI:
     
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.allowed_origins,
+        allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
     application.state.limiter = limiter
+    
+    # Health check endpoint
+    @application.get("/health")
+    async def health_check():
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "service": settings.project_name,
+            "version": settings.version
+        }
     
     # Include routers
     application.include_router(question_router)
@@ -47,4 +59,5 @@ app = create_application()
 
 if __name__ == "__main__":
     import uvicorn
+    load_dotenv()
     uvicorn.run("main:app", host="0.0.0.0", port=settings.port)

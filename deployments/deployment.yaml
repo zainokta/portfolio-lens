@@ -4,7 +4,7 @@ metadata:
   name: portfolio-lens-service
   namespace: ichiban
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: portfolio-lens-service
@@ -25,10 +25,46 @@ spec:
             - name: http
               containerPort: 8000
               protocol: TCP
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: PROJECT_NAME
+              value: "PortfolioLens"
+            - name: PROJECT_DESCRIPTION
+              value: "Suggesting the ability to look deeply into my work experience"
+            - name: VERSION
+              value: "1.0.0"
+            - name: PORT
+              value: "8000"
+            - name: DB_NAME
+              value: "portfolio.db"
+            - name: ALLOWED_ORIGINS
+              value: "https://zainokta.com"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: openai-api-key
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             limits:
               cpu: "128m"
-              memory: "128Mi"
+              memory: "384Mi"
             requests:
               cpu: "128m"
-              memory: "128Mi"
+              memory: "384Mi"

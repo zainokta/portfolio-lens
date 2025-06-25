@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: portfolio-ingress
+  name: portfolio-lens-ingress
   namespace: ichiban
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
@@ -21,6 +21,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: portfolio-service
+                name: portfolio-lens-service
                 port:
                   number: 80
