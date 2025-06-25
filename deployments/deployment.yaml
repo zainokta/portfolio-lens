@@ -37,11 +37,20 @@ spec:
             - name: PORT
               value: "8000"
             - name: DB_HOST
-              value: "postgres-service"  # Update this to your PostgreSQL service name
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: db-host
             - name: DB_PORT
-              value: "16348"
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: db-port
             - name: DB_NAME
-              value: "portfolio"
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: db-name
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
