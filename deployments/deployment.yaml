@@ -36,8 +36,22 @@ spec:
               value: "1.0.0"
             - name: PORT
               value: "8000"
+            - name: DB_HOST
+              value: "postgres-service"  # Update this to your PostgreSQL service name
+            - name: DB_PORT
+              value: "16348"
             - name: DB_NAME
-              value: "portfolio.db"
+              value: "portfolio"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: db-password
             - name: ALLOWED_ORIGINS
               value: "https://zainokta.com"
             - name: OPENAI_API_KEY

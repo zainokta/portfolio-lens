@@ -46,7 +46,6 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser main.py ./
 COPY --chown=appuser:appuser .env ./
-COPY --chown=appuser:appuser portfolio.db ./
 COPY --chown=appuser:appuser prompt.txt ./
 
 # Switch to the non-root user

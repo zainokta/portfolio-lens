@@ -15,7 +15,21 @@ class Settings(BaseSettings):
     # Environment configuration
     environment: str = "development"  # development, staging, production
 
-    db_name: str = "portfolio.db"
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "portfolio"
+    db_user: str = "postgres"
+    db_password: str = ""
+    
+    @property
+    def database_url(self) -> str:
+        """Construct PostgreSQL database URL."""
+        return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}?sslmode=require"
+    
+    @property
+    def async_database_url(self) -> str:
+        """Construct async PostgreSQL database URL."""
+        return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}?sslmode=require"
     
     allowed_origins: str = "*"
 

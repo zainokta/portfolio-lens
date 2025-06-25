@@ -17,7 +17,6 @@ async def lifespan(app: FastAPI):
     conn.close()
 
 def create_application() -> FastAPI:
-    # Conditionally set docs URLs - disable in production
     docs_url = None if settings.is_production else "/docs"
     redoc_url = None if settings.is_production else "/redoc"
     

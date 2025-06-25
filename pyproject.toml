@@ -5,7 +5,9 @@ description = "Suggesting the ability to look deeply into my work experience"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "duckdb>=1.2.1",
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",
+    "sqlalchemy>=2.0.0",
     "fastapi[standard]>=0.115.11",
     "langchain-community>=0.3.19",
     "langchain-openai>=0.3.8",

@@ -8,7 +8,7 @@ question_router = APIRouter(prefix="/api/question", tags=["question"])
 
 
 @question_router.post("/query")
-@limiter.limit("2 per hour", error_message="Rate limit exceeded. Try again later.")
+@limiter.limit("10 per minute", error_message="Rate limit exceeded. Try again later.")
 async def query_question(request: Request, question: Question, service: QuestionServiceDep):
     if len(question.query) > 300:
         raise HTTPException(status_code=400, detail="Query too long")
