@@ -239,6 +239,12 @@ class QuestionService:
 
                 Current year: {current_year}
 
+                Instructions for different query types:
+                - For PROJECT queries: Provide detailed descriptions including technologies used, features, purpose, and implementation details
+                - For SKILL queries: List relevant technologies, frameworks, and programming languages with context
+                - For EXPERIENCE queries: Include job roles, responsibilities, and accomplishments
+                - For GENERAL queries: Provide comprehensive information from all relevant categories
+
                 Please provide a detailed and informative answer based ONLY on the provided context. If the context doesn't contain enough information to fully answer the question, mention what information is available."""
             
             response = llm.invoke(prompt)
@@ -275,6 +281,82 @@ class QuestionService:
             return [content[0] for content in results]
         except Exception as e:
             print(f"Error searching by category: {e}")
+            return []
+
+    def search_projects(self, query: str) -> List[str]:
+        """Enhanced search for projects with detailed descriptions."""
+        try:
+            query_embedding = embedding_model.embed_query(query)
+
+            if isinstance(query_embedding[0], list):  
+                query_embedding = query_embedding[0]
+
+            query_vector = np.array(query_embedding)
+            
+            # Check if query mentions a specific project
+            query_lower = query.lower()
+            project_keywords = ['petualang knight', 'alle', 'worker brawler', 'url shortener', 'multiplayer', 'zenginx', 'portfoliolens', 'email newsletter', 'unity', 'game']
+            mentioned_project = None
+            for keyword in project_keywords:
+                if keyword in query_lower:
+                    mentioned_project = keyword
+                    break
+            
+            with engine.connect() as connection:
+                if mentioned_project:
+                    # If specific project mentioned, get ALL related content
+                    results = connection.execute(
+                        text("""
+                            SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category
+                            FROM portfolio_content
+                            WHERE category = 'Projects' AND LOWER(content) LIKE :project_pattern
+                            ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC;
+                        """), 
+                        {"query_embedding": query_vector.tolist(), "project_pattern": f"%{mentioned_project}%"}
+                    ).fetchall()
+                    
+                    # If no exact match, do similarity search
+                    if not results:
+                        results = connection.execute(
+                            text("""
+                                SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category
+                                FROM portfolio_content
+                                WHERE category = 'Projects'
+                                ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
+                                LIMIT 8;
+                            """), 
+                            {"query_embedding": query_vector.tolist()}
+                        ).fetchall()
+                else:
+                    # General project search
+                    results = connection.execute(
+                        text("""
+                            SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category
+                            FROM portfolio_content
+                            WHERE category = 'Projects' AND 1 - (embedding <=> CAST(:query_embedding AS vector)) >= 0.3
+                            ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
+                            LIMIT 10;
+                        """), 
+                        {"query_embedding": query_vector.tolist()}
+                    ).fetchall()
+                    
+                    # If no good matches, get all projects
+                    if not results:
+                        results = connection.execute(
+                            text("""
+                                SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category
+                                FROM portfolio_content
+                                WHERE category = 'Projects'
+                                ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
+                                LIMIT 10;
+                            """), 
+                            {"query_embedding": query_vector.tolist()}
+                        ).fetchall()
+
+                return [result[0] for result in results]
+            
+        except Exception as e:
+            print(f"Error searching projects: {e}")
             return []
 
     def search_work_experience(self, query: str) -> List[str]:
@@ -426,7 +508,7 @@ Classification:"""
         
         if any(keyword in query_lower for keyword in ['skill', 'technology', 'programming', 'language', 'framework', 'tool']):
             return 'Technical Skills'
-        elif any(keyword in query_lower for keyword in ['project', 'built', 'developed', 'created', 'application', 'system']):
+        elif any(keyword in query_lower for keyword in ['project', 'built', 'developed', 'created', 'application', 'system', 'game', 'unity', 'portfolio', 'website', 'shortener', 'multiplayer', 'newsletter']):
             return 'Projects'
         elif any(keyword in query_lower for keyword in ['work', 'job', 'role', 'position', 'company', 'employer', 'career', 'experience', 'past', 'years']):
             return 'Work Experience'
@@ -471,7 +553,11 @@ Classification:"""
             else:
                 category = self._detect_query_category(user_query)
                 
-                if category:
+                if category == 'Projects':
+                    relevant_contexts = self.search_projects(user_query)
+                    if not relevant_contexts:
+                        relevant_contexts = self.search_portfolio(user_query)
+                elif category:
                     relevant_contexts = self.search_by_category(user_query, category)
                     if not relevant_contexts:
                         relevant_contexts = self.search_portfolio(user_query)
