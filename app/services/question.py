@@ -32,12 +32,42 @@ with open(prompt_path, 'r') as f:
 set_llm_cache(InMemoryCache())
 
 class QuestionService:
+    # Fast-path keyword lists for quick relevance detection
+    OBVIOUS_IRRELEVANT = [
+        'favorite color', 'favorite food', 'how old are you', 'birthday',
+        'girlfriend', 'boyfriend', 'married', 'single', 'dating',
+        'address', 'phone number', 'where do you live', 'home address',
+        'religion', 'political', 'vote for', 'opinion on trump',
+        'do you like', 'what do you think about', 'personal opinion',
+        'hobby', 'hobbies', 'free time', 'weekend', 'vacation',
+        'favorite movie', 'favorite book', 'pets', 'children', 'kids',
+        'height', 'weight', 'appearance', 'looks like', 'photo',
+    ]
+
+    OBVIOUS_RELEVANT = [
+        'work experience', 'worked at', 'job', 'role', 'position',
+        'project', 'built', 'developed', 'created', 'designed',
+        'skill', 'technology', 'programming language', 'framework',
+        'education', 'degree', 'university', 'graduated',
+        'certificate', 'certification', 'course', 'training',
+        'years of experience', 'career', 'professional', 'resume',
+        'portfolio', 'achievement', 'accomplishment', 'contributed',
+        'tech stack', 'backend', 'frontend', 'database', 'cloud',
+    ]
+
     def __init__(self):
         # Rate limiting: track requests per IP/session
         self.request_history: Dict[str, List[float]] = {}
         self.max_requests_per_minute = 30
         self.max_requests_per_hour = 200
-        
+
+        # Fast-path metrics tracking
+        self.fast_path_stats = {
+            'fast_irrelevant': 0,
+            'fast_relevant': 0,
+            'llm_fallback': 0,
+        }
+
         # Setup logging for security monitoring
         self.security_logger = logging.getLogger('portfolio_security')
         if not self.security_logger.handlers:
@@ -84,16 +114,35 @@ class QuestionService:
         self.security_logger.warning(
             f"Suspicious activity detected - Client: {client_id}, Reason: {reason}, Query: {query[:100]}..."
         )
-    def search_portfolio(self, query: str) -> List[str]:
+
+    def get_fast_path_stats(self) -> Dict[str, any]:
+        """Get fast-path performance statistics."""
+        total = sum(self.fast_path_stats.values())
+        if total == 0:
+            return {
+                'total_queries': 0,
+                'fast_path_hit_rate': 0.0,
+                'llm_fallback_rate': 0.0,
+                'stats': self.fast_path_stats
+            }
+
+        fast_path_hits = self.fast_path_stats['fast_irrelevant'] + self.fast_path_stats['fast_relevant']
+        return {
+            'total_queries': total,
+            'fast_path_hit_rate': round(fast_path_hits / total * 100, 2),
+            'llm_fallback_rate': round(self.fast_path_stats['llm_fallback'] / total * 100, 2),
+            'stats': self.fast_path_stats.copy()
+        }
+    def search_portfolio(self, query: str, limit: int = 8) -> List[str]:
         """Search for relevant portfolio content based on query similarity."""
         try:
             query_embedding = embedding_model.embed_query(query)
 
-            if isinstance(query_embedding[0], list):  
+            if isinstance(query_embedding[0], list):
                 query_embedding = query_embedding[0]
 
             query_vector = np.array(query_embedding)
-            
+
             with engine.connect() as connection:
                 results = connection.execute(
                     text("""
@@ -101,9 +150,9 @@ class QuestionService:
                         FROM portfolio_content
                         WHERE 1 - (embedding <=> CAST(:query_embedding AS vector)) >= 0.4
                         ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                        LIMIT 8;
-                    """), 
-                    {"query_embedding": query_vector.tolist()}
+                        LIMIT :limit;
+                    """),
+                    {"query_embedding": query_vector.tolist(), "limit": limit}
                 ).fetchall()
 
                 if not results:
@@ -112,12 +161,13 @@ class QuestionService:
                             SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category, company
                             FROM portfolio_content
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                            LIMIT 8;
-                        """), 
-                        {"query_embedding": query_vector.tolist()}
+                            LIMIT :limit;
+                        """),
+                        {"query_embedding": query_vector.tolist(), "limit": limit}
                     ).fetchall()
 
-            return [content[0] for content in results]
+            # Filter out empty content
+            return [content[0] for content in results if content[0].strip()]
         except Exception as e:
             print(f"Error searching portfolio: {e}")
             return []
@@ -213,17 +263,17 @@ Based on the professional context provided above and the response guidelines, pl
             print(f"Error generating answer: {e}")
             return "I encountered an error while generating the answer. Please try again."
 
-    def search_by_category(self, query: str, category: str = None) -> List[str]:
+    def search_by_category(self, query: str, category: str = None, limit: int = 8) -> List[str]:
         """Search for content within a specific category."""
         try:
             query_embedding = embedding_model.embed_query(query)
 
-            if isinstance(query_embedding[0], list):  
+            if isinstance(query_embedding[0], list):
                 query_embedding = query_embedding[0]
 
             if category:
                 query_vector = np.array(query_embedding)
-                
+
                 with engine.connect() as connection:
                     results = connection.execute(
                         text("""
@@ -231,28 +281,29 @@ Based on the professional context provided above and the response guidelines, pl
                             FROM portfolio_content
                             WHERE category = :category AND 1 - (embedding <=> CAST(:query_embedding AS vector)) >= 0.3
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                            LIMIT 8;
-                        """), 
-                        {"query_embedding": query_vector.tolist(), "category": category}
+                            LIMIT :limit;
+                        """),
+                        {"query_embedding": query_vector.tolist(), "category": category, "limit": limit}
                     ).fetchall()
             else:
-                return self.search_portfolio(query)
+                return self.search_portfolio(query, limit=limit)
 
-            return [content[0] for content in results]
+            # Filter out empty content
+            return [content[0] for content in results if content[0].strip()]
         except Exception as e:
             print(f"Error searching by category: {e}")
             return []
 
-    def search_projects(self, query: str) -> List[str]:
+    def search_projects(self, query: str, limit: int = 10) -> List[str]:
         """Enhanced search for projects with detailed descriptions."""
         try:
             query_embedding = embedding_model.embed_query(query)
 
-            if isinstance(query_embedding[0], list):  
+            if isinstance(query_embedding[0], list):
                 query_embedding = query_embedding[0]
 
             query_vector = np.array(query_embedding)
-            
+
             # Check if query mentions a specific project
             query_lower = query.lower()
             project_keywords = ['petualang knight', 'alle', 'worker brawler', 'url shortener', 'multiplayer', 'zenginx', 'portfoliolens', 'email newsletter', 'unity', 'game']
@@ -261,7 +312,7 @@ Based on the professional context provided above and the response guidelines, pl
                 if keyword in query_lower:
                     mentioned_project = keyword
                     break
-            
+
             with engine.connect() as connection:
                 if mentioned_project:
                     # If specific project mentioned, get ALL related content
@@ -271,10 +322,10 @@ Based on the professional context provided above and the response guidelines, pl
                             FROM portfolio_content
                             WHERE category = 'Projects' AND LOWER(content) LIKE :project_pattern
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC;
-                        """), 
+                        """),
                         {"query_embedding": query_vector.tolist(), "project_pattern": f"%{mentioned_project}%"}
                     ).fetchall()
-                    
+
                     # If no exact match, do similarity search
                     if not results:
                         results = connection.execute(
@@ -283,9 +334,9 @@ Based on the professional context provided above and the response guidelines, pl
                                 FROM portfolio_content
                                 WHERE category = 'Projects'
                                 ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                                LIMIT 8;
-                            """), 
-                            {"query_embedding": query_vector.tolist()}
+                                LIMIT :limit;
+                            """),
+                            {"query_embedding": query_vector.tolist(), "limit": limit}
                         ).fetchall()
                 else:
                     # General project search
@@ -295,11 +346,11 @@ Based on the professional context provided above and the response guidelines, pl
                             FROM portfolio_content
                             WHERE category = 'Projects' AND 1 - (embedding <=> CAST(:query_embedding AS vector)) >= 0.3
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                            LIMIT 10;
-                        """), 
-                        {"query_embedding": query_vector.tolist()}
+                            LIMIT :limit;
+                        """),
+                        {"query_embedding": query_vector.tolist(), "limit": limit}
                     ).fetchall()
-                    
+
                     # If no good matches, get all projects
                     if not results:
                         results = connection.execute(
@@ -308,49 +359,51 @@ Based on the professional context provided above and the response guidelines, pl
                                 FROM portfolio_content
                                 WHERE category = 'Projects'
                                 ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                                LIMIT 10;
-                            """), 
-                            {"query_embedding": query_vector.tolist()}
+                                LIMIT :limit;
+                            """),
+                            {"query_embedding": query_vector.tolist(), "limit": limit}
                         ).fetchall()
 
-                return [result[0] for result in results]
-            
+                # Filter out empty content
+                return [result[0] for result in results if result[0].strip()]
+
         except Exception as e:
             print(f"Error searching projects: {e}")
             return []
 
-    def search_work_experience(self, query: str) -> List[str]:
+    def search_work_experience(self, query: str, limit: int = 10) -> List[str]:
         """Enhanced search for work experience with detailed accomplishments."""
         try:
             query_embedding = embedding_model.embed_query(query)
 
-            if isinstance(query_embedding[0], list):  
+            if isinstance(query_embedding[0], list):
                 query_embedding = query_embedding[0]
 
             query_vector = np.array(query_embedding)
-            
+
             # Check if query mentions a specific company
             query_lower = query.lower()
-            company_keywords = ['accelbyte', 'efishery', 'dibimbing', 'sakoo', 'alterra', 'ruangguru']
+            company_keywords = ['accelbyte', 'efishery', 'dibimbing', 'sakoo', 'alterra', 'ruangguru', 'dana']
             mentioned_company = None
             for keyword in company_keywords:
                 if keyword in query_lower:
                     mentioned_company = keyword
                     break
-            
+
             with engine.connect() as connection:
                 if mentioned_company:
                     # If specific company mentioned, get ALL experiences for that company
                     company_map = {
                         'accelbyte': 'AccelByte',
-                        'efishery': 'eFishery', 
+                        'efishery': 'eFishery',
                         'dibimbing': 'Dibimbing.id',
                         'sakoo': 'Sakoo',
                         'alterra': 'Alterra',
-                        'ruangguru': 'Ruangguru'
+                        'ruangguru': 'Ruangguru',
+                        'dana': 'DANA Indonesia'
                     }
                     actual_company = company_map.get(mentioned_company, mentioned_company)
-                    
+
                     # Get ALL work experience entries for the specific company
                     results = connection.execute(
                         text("""
@@ -358,22 +411,22 @@ Based on the professional context provided above and the response guidelines, pl
                             FROM portfolio_content
                             WHERE category = 'Work Experience' AND company = :company
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC;
-                        """), 
+                        """),
                         {"query_embedding": query_vector.tolist(), "company": actual_company}
                     ).fetchall()
-                    
+
                     # Also get related technical skills and projects for the company
                     company_details = connection.execute(
                         text("""
                             SELECT content, category
                             FROM portfolio_content
                             WHERE company = :company AND category IN ('Technical Skills', 'Projects')
-                            LIMIT 10;
-                        """), 
-                        {"company": actual_company}
+                            LIMIT :limit;
+                        """),
+                        {"company": actual_company, "limit": limit}
                     ).fetchall()
-                    
-                    all_content = [result[0] for result in results] + [detail[0] for detail in company_details]
+
+                    all_content = [result[0] for result in results if result[0].strip()] + [detail[0] for detail in company_details if detail[0].strip()]
                     return all_content
                 else:
                     # General work experience search
@@ -381,17 +434,17 @@ Based on the professional context provided above and the response guidelines, pl
                         text("""
                             SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category, company
                             FROM portfolio_content
-                            WHERE category = 'Work Experience' 
+                            WHERE category = 'Work Experience'
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
-                            LIMIT 10;
-                        """), 
-                        {"query_embedding": query_vector.tolist()}
+                            LIMIT :limit;
+                        """),
+                        {"query_embedding": query_vector.tolist(), "limit": limit}
                     ).fetchall()
-                    
+
                     # Also get related technical skills and projects for each company
                     companies = list(set([result[3] for result in results if result[3]]))
                     additional_context = []
-                    
+
                     for company in companies:
                         company_details = connection.execute(
                             text("""
@@ -399,21 +452,43 @@ Based on the professional context provided above and the response guidelines, pl
                                 FROM portfolio_content
                                 WHERE company = :company AND category IN ('Technical Skills', 'Projects')
                                 LIMIT 5;
-                            """), 
+                            """),
                             {"company": company}
                         ).fetchall()
-                        additional_context.extend([detail[0] for detail in company_details])
+                        additional_context.extend([detail[0] for detail in company_details if detail[0].strip()])
 
                     # Combine work experience with related accomplishments
-                    all_content = [result[0] for result in results] + additional_context
-                    return all_content[:12]  # Limit total results
+                    all_content = [result[0] for result in results if result[0].strip()] + additional_context
+                    # For comprehensive queries, return all; otherwise limit
+                    max_total = limit + len(additional_context) if limit < 20 else len(all_content)
+                    return all_content[:max_total]
             
         except Exception as e:
             print(f"Error searching work experience: {e}")
             return []
 
     def _is_irrelevant_query(self, query: str) -> bool:
-        """Check if query is about Zain's professional background using LLM."""
+        """Check if query is irrelevant using fast-path keywords, then LLM fallback."""
+        query_lower = query.lower()
+
+        # Fast path: Obvious irrelevant queries
+        for keyword in self.OBVIOUS_IRRELEVANT:
+            if keyword in query_lower:
+                self.fast_path_stats['fast_irrelevant'] += 1
+                return True
+
+        # Fast path: Obvious relevant queries
+        for keyword in self.OBVIOUS_RELEVANT:
+            if keyword in query_lower:
+                self.fast_path_stats['fast_relevant'] += 1
+                return False
+
+        # Slow path: Use LLM for ambiguous cases
+        self.fast_path_stats['llm_fallback'] += 1
+        return self._is_irrelevant_query_llm(query)
+
+    def _is_irrelevant_query_llm(self, query: str) -> bool:
+        """Check if query is about Zain's professional background using LLM (slow path)."""
         try:
             # Sanitize query input
             query = self._sanitize_input(query)
@@ -463,31 +538,71 @@ Classification:"""
             return any(keyword in query_lower for keyword in irrelevant_keywords)
 
     def _detect_query_category(self, query: str) -> str:
-        """Detect the category of the user's query."""
+        """Detect the category of the user's query with expanded keyword coverage."""
         query_lower = query.lower()
-        
-        if any(keyword in query_lower for keyword in ['skill', 'technology', 'programming', 'language', 'framework', 'tool']):
+
+        # Technical Skills - expanded with synonyms and variations
+        if any(keyword in query_lower for keyword in [
+            'skill', 'technology', 'tech stack', 'programming', 'language', 'framework', 'tool',
+            'technologies', 'languages', 'proficient', 'know', 'familiar with', 'experience with',
+            'backend', 'frontend', 'database', 'cloud', 'devops', 'stack', 'technical'
+        ]):
             return 'Technical Skills'
-        elif any(keyword in query_lower for keyword in ['project', 'built', 'developed', 'created', 'application', 'system', 'game', 'unity', 'portfolio', 'website', 'shortener', 'multiplayer', 'newsletter']):
+
+        # Projects - expanded with action verbs and project types
+        elif any(keyword in query_lower for keyword in [
+            'project', 'built', 'developed', 'created', 'application', 'system', 'game',
+            'unity', 'portfolio', 'website', 'shortener', 'multiplayer', 'newsletter',
+            'designed', 'architected', 'implemented', 'engineered', 'constructed',
+            'app', 'software', 'service', 'platform', 'tool', 'prototype'
+        ]):
             return 'Projects'
-        elif any(keyword in query_lower for keyword in ['work', 'job', 'role', 'position', 'company', 'employer', 'career', 'experience', 'past', 'years']):
+
+        # Work Experience - expanded with career-related terms
+        elif any(keyword in query_lower for keyword in [
+            'work', 'job', 'role', 'position', 'company', 'employer', 'career', 'experience',
+            'past', 'years', 'worked at', 'employed', 'employment', 'professional',
+            'accomplishment', 'achievement', 'contribution', 'responsibility',
+            'accelbyte', 'efishery', 'dibimbing', 'sakoo', 'alterra', 'ruangguru'
+        ]):
             return 'Work Experience'
-        elif any(keyword in query_lower for keyword in ['education', 'degree', 'university', 'college', 'study', 'academic']):
+
+        # Education - expanded with academic terms
+        elif any(keyword in query_lower for keyword in [
+            'education', 'degree', 'university', 'college', 'study', 'academic',
+            'graduated', 'graduation', 'bachelor', 'master', 'phd', 'diploma',
+            'school', 'politeknik', 'institute'
+        ]):
             return 'Education'
-        elif any(keyword in query_lower for keyword in ['certificate', 'certification', 'course', 'training']):
+
+        # Certifications - expanded with training and credentials
+        elif any(keyword in query_lower for keyword in [
+            'certificate', 'certification', 'course', 'training',
+            'certified', 'credential', 'license', 'qualification'
+        ]):
             return 'Certifications'
-        
+
         return None
     
+    def _is_comprehensive_query(self, query: str) -> bool:
+        """Check if user wants ALL results (comprehensive query)."""
+        query_lower = query.lower()
+        comprehensive_keywords = [
+            'all', 'every', 'everything', 'complete', 'entire', 'full list',
+            'comprehensive', 'exhaustive', 'total', 'all of', 'every single',
+            'complete list', 'full'
+        ]
+        return any(keyword in query_lower for keyword in comprehensive_keywords)
+
     def _is_experience_query(self, query: str) -> bool:
         """Check if query is specifically about work experience with timeline."""
         query_lower = query.lower()
         experience_keywords = ['experience', 'past', 'years', 'worked', 'roles', 'positions']
         timeline_keywords = ['3 years', 'past 3', 'last 3', 'recent', 'timeline']
-        
+
         has_experience = any(keyword in query_lower for keyword in experience_keywords)
         has_timeline = any(keyword in query_lower for keyword in timeline_keywords)
-        
+
         return has_experience and (has_timeline or 'years' in query_lower)
 
     def get_comprehensive_answer(self, user_query: str, client_id: str = None) -> str:
@@ -503,30 +618,37 @@ Classification:"""
             
             # Sanitize user input
             user_query = self._sanitize_input(user_query, client_id)
-            
+
             if self._is_irrelevant_query(user_query):
                 return "Sorry I don't have that kind of information"
-            
+
+            # Detect if user wants comprehensive results (all entries)
+            is_comprehensive = self._is_comprehensive_query(user_query)
+            search_limit = 30 if is_comprehensive else 10  # Increase limit for comprehensive queries
+
             # Check if this is a detailed experience query
             if self._is_experience_query(user_query):
-                relevant_contexts = self.search_work_experience(user_query)
+                relevant_contexts = self.search_work_experience(user_query, limit=search_limit)
             else:
                 category = self._detect_query_category(user_query)
-                
+
                 if category == 'Projects':
-                    relevant_contexts = self.search_projects(user_query)
+                    project_limit = 20 if is_comprehensive else 10
+                    relevant_contexts = self.search_projects(user_query, limit=project_limit)
                     if not relevant_contexts:
-                        relevant_contexts = self.search_portfolio(user_query)
+                        relevant_contexts = self.search_portfolio(user_query, limit=search_limit)
                 elif category == 'Work Experience':
-                    relevant_contexts = self.search_work_experience(user_query)
+                    relevant_contexts = self.search_work_experience(user_query, limit=search_limit)
                     if not relevant_contexts:
-                        relevant_contexts = self.search_portfolio(user_query)
+                        relevant_contexts = self.search_portfolio(user_query, limit=search_limit)
                 elif category:
-                    relevant_contexts = self.search_by_category(user_query, category)
+                    category_limit = 50 if is_comprehensive else 8
+                    relevant_contexts = self.search_by_category(user_query, category, limit=category_limit)
                     if not relevant_contexts:
-                        relevant_contexts = self.search_portfolio(user_query)
+                        relevant_contexts = self.search_portfolio(user_query, limit=search_limit)
                 else:
-                    relevant_contexts = self.search_portfolio(user_query)
+                    portfolio_limit = 50 if is_comprehensive else 8
+                    relevant_contexts = self.search_portfolio(user_query, limit=portfolio_limit)
             
             if not relevant_contexts:
                 return "I couldn't find relevant information to answer your question. Please try rephrasing or ask about Zain's skills, projects, or work experience."
