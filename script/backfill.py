@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.config import settings
 
-def load_portfolio_data() -> List[str]:
+def load_portfolio_data() -> List[Dict[str, str]]:
     """Load and structure portfolio data from JSON file."""
     with open('backfill.json') as json_data:
         return json.load(json_data)
@@ -35,39 +35,6 @@ def create_database_schema(conn):
     
     conn.commit()
 
-def categorize_content(content: str) -> Dict[str, str]:
-    """Categorize content and extract company information."""
-    content_lower = content.lower()
-    
-    company = "General"
-    if "accelbyte" in content_lower:
-        company = "AccelByte"
-    elif "efishery" in content_lower:
-        company = "eFishery"
-    elif "dibimbing" in content_lower:
-        company = "Dibimbing.id"
-    elif "sakoo" in content_lower:
-        company = "Sakoo"
-    elif "alterra" in content_lower:
-        company = "Alterra"
-    elif "ruangguru" in content_lower:
-        company = "Ruangguru"
-    
-    category = "General"
-    if any(keyword in content_lower for keyword in ["tech stack", "programming", "technologies"]):
-        category = "Technical Skills"
-    elif any(keyword in content_lower for keyword in ["project", "developed", "implemented", "architected"]):
-        category = "Projects"
-    elif any(keyword in content_lower for keyword in ["mentored", "guided", "taught", "students"]):
-        category = "Mentoring"
-    elif any(keyword in content_lower for keyword in ["worked", "engineer", "intern", "present"]):
-        category = "Work Experience"
-    elif any(keyword in content_lower for keyword in ["education", "degree", "university", "politeknik"]):
-        category = "Education"
-    elif any(keyword in content_lower for keyword in ["language", "english", "indonesian"]):
-        category = "Languages"
-    
-    return {"category": category, "company": company}
 
 def main():
     """Main function to populate the portfolio database."""
@@ -87,24 +54,27 @@ def main():
         with engine.connect() as conn:
             create_database_schema(conn)
             
-            portfolio_chunks = load_portfolio_data()
-            
-            print(f"Processing {len(portfolio_chunks)} portfolio entries...")
-            
-            embeddings = embedding_model.embed_documents(portfolio_chunks)
-            
-            for i, (content, embedding) in enumerate(zip(portfolio_chunks, embeddings)):
-                metadata = categorize_content(content)
-                
+            portfolio_data = load_portfolio_data()
+
+            print(f"Processing {len(portfolio_data)} portfolio entries...")
+
+            # Extract content for embedding generation
+            contents = [item["content"] for item in portfolio_data]
+
+            # Generate embeddings for all content
+            embeddings = embedding_model.embed_documents(contents)
+
+            # Insert data with explicit category and company from JSON
+            for i, (item, embedding) in enumerate(zip(portfolio_data, embeddings)):
                 embedding_vector = np.array(embedding).tolist()
-                
+
                 conn.execute(
                     text("INSERT INTO portfolio_content (content, embedding, category, company) VALUES (:content, :embedding, :category, :company)"),
                     {
-                        "content": content,
+                        "content": item["content"],
                         "embedding": embedding_vector,
-                        "category": metadata["category"],
-                        "company": metadata["company"]
+                        "category": item["category"],
+                        "company": item["company"]
                     }
                 )
             
@@ -118,8 +88,8 @@ def main():
             """))
             
             conn.commit()
-            
-            print(f"Successfully populated database with {len(portfolio_chunks)} entries")
+
+            print(f"Successfully populated database with {len(portfolio_data)} entries")
             
             result = conn.execute(text("""
                 SELECT category, company, COUNT(*) as count 
