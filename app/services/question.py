@@ -339,12 +339,12 @@ Based on the professional context provided above and the response guidelines, pl
                             {"query_embedding": query_vector.tolist(), "limit": limit}
                         ).fetchall()
                 else:
-                    # General project search
+                    # General project search with lower threshold for better recall
                     results = connection.execute(
                         text("""
                             SELECT content, 1 - (embedding <=> CAST(:query_embedding AS vector)) AS similarity, category
                             FROM portfolio_content
-                            WHERE category = 'Projects' AND 1 - (embedding <=> CAST(:query_embedding AS vector)) >= 0.3
+                            WHERE category = 'Projects' AND 1 - (embedding <=> CAST(:query_embedding AS vector)) >= 0.15
                             ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
                             LIMIT :limit;
                         """),
@@ -590,7 +590,8 @@ Classification:"""
         comprehensive_keywords = [
             'all', 'every', 'everything', 'complete', 'entire', 'full list',
             'comprehensive', 'exhaustive', 'total', 'all of', 'every single',
-            'complete list', 'full'
+            'complete list', 'full', 'were', 'has been', 'have been', 'did',
+            'have done', 'worked on'
         ]
         return any(keyword in query_lower for keyword in comprehensive_keywords)
 
@@ -633,7 +634,7 @@ Classification:"""
                 category = self._detect_query_category(user_query)
 
                 if category == 'Projects':
-                    project_limit = 20 if is_comprehensive else 10
+                    project_limit = 20 if is_comprehensive else 15
                     relevant_contexts = self.search_projects(user_query, limit=project_limit)
                     if not relevant_contexts:
                         relevant_contexts = self.search_portfolio(user_query, limit=search_limit)
