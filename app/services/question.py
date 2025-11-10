@@ -114,11 +114,21 @@ class QuestionService:
         self.max_requests_per_minute = 30
         self.max_requests_per_hour = 200
 
+        # Embedding cache: reduce OpenAI API calls
+        self._embedding_cache: Dict[str, List[float]] = {}
+        self._embedding_cache_max_size = 1000  # ~6MB for 1000 queries
+
         # Fast-path metrics tracking
         self.fast_path_stats = {
             "fast_irrelevant": 0,
             "fast_relevant": 0,
             "llm_fallback": 0,
+        }
+
+        # Embedding cache metrics
+        self.embedding_cache_stats = {
+            "hits": 0,
+            "misses": 0,
         }
 
         # Setup logging for security monitoring
@@ -176,6 +186,41 @@ class QuestionService:
             f"Suspicious activity detected - Client: {client_id}, Reason: {reason}, Query: {query[:100]}..."
         )
 
+    def _get_cached_embedding(self, query: str) -> List[float]:
+        """Get embedding with in-memory caching to reduce API calls.
+
+        Args:
+            query: The query string to embed
+
+        Returns:
+            List of floats representing the embedding vector
+        """
+        # Use MD5 hash as cache key (handles long queries better)
+        cache_key = hashlib.md5(query.encode()).hexdigest()
+
+        # Check cache
+        if cache_key in self._embedding_cache:
+            self.embedding_cache_stats["hits"] += 1
+            return self._embedding_cache[cache_key]
+
+        # Cache miss - generate embedding via OpenAI API
+        self.embedding_cache_stats["misses"] += 1
+        embedding = embedding_model.embed_query(query)
+
+        # Handle nested list format (some OpenAI versions return nested lists)
+        if isinstance(embedding[0], list):
+            embedding = embedding[0]
+
+        # Implement simple LRU eviction when cache is full
+        if len(self._embedding_cache) >= self._embedding_cache_max_size:
+            # Remove the first (oldest) entry
+            oldest_key = next(iter(self._embedding_cache))
+            del self._embedding_cache[oldest_key]
+
+        # Store in cache
+        self._embedding_cache[cache_key] = embedding
+        return embedding
+
     def get_fast_path_stats(self) -> Dict[str, any]:
         """Get fast-path performance statistics."""
         total = sum(self.fast_path_stats.values())
@@ -185,12 +230,32 @@ class QuestionService:
                 "fast_path_hit_rate": 0.0,
                 "llm_fallback_rate": 0.0,
                 "stats": self.fast_path_stats,
+                "embedding_cache": {
+                    "hits": self.embedding_cache_stats["hits"],
+                    "misses": self.embedding_cache_stats["misses"],
+                    "hit_rate": 0.0,
+                    "cache_size": len(self._embedding_cache),
+                    "max_size": self._embedding_cache_max_size,
+                },
             }
 
         fast_path_hits = (
             self.fast_path_stats["fast_irrelevant"]
             + self.fast_path_stats["fast_relevant"]
         )
+
+        # Calculate embedding cache hit rate
+        total_embedding_requests = (
+            self.embedding_cache_stats["hits"] + self.embedding_cache_stats["misses"]
+        )
+        embedding_hit_rate = (
+            round(
+                self.embedding_cache_stats["hits"] / total_embedding_requests * 100, 2
+            )
+            if total_embedding_requests > 0
+            else 0.0
+        )
+
         return {
             "total_queries": total,
             "fast_path_hit_rate": round(fast_path_hits / total * 100, 2),
@@ -198,16 +263,19 @@ class QuestionService:
                 self.fast_path_stats["llm_fallback"] / total * 100, 2
             ),
             "stats": self.fast_path_stats.copy(),
+            "embedding_cache": {
+                "hits": self.embedding_cache_stats["hits"],
+                "misses": self.embedding_cache_stats["misses"],
+                "hit_rate": embedding_hit_rate,
+                "cache_size": len(self._embedding_cache),
+                "max_size": self._embedding_cache_max_size,
+            },
         }
 
     def search_portfolio(self, query: str, limit: int = 8) -> List[str]:
         """Search for relevant portfolio content based on query similarity."""
         try:
-            query_embedding = embedding_model.embed_query(query)
-
-            if isinstance(query_embedding[0], list):
-                query_embedding = query_embedding[0]
-
+            query_embedding = self._get_cached_embedding(query)
             query_vector = np.array(query_embedding)
 
             with engine.connect() as connection:
@@ -343,10 +411,7 @@ Based on the professional context provided above and the response guidelines, pl
     ) -> List[str]:
         """Search for content within a specific category."""
         try:
-            query_embedding = embedding_model.embed_query(query)
-
-            if isinstance(query_embedding[0], list):
-                query_embedding = query_embedding[0]
+            query_embedding = self._get_cached_embedding(query)
 
             if category:
                 query_vector = np.array(query_embedding)
@@ -378,11 +443,7 @@ Based on the professional context provided above and the response guidelines, pl
     def search_projects(self, query: str, limit: int = 10) -> List[str]:
         """Enhanced search for projects with detailed descriptions."""
         try:
-            query_embedding = embedding_model.embed_query(query)
-
-            if isinstance(query_embedding[0], list):
-                query_embedding = query_embedding[0]
-
+            query_embedding = self._get_cached_embedding(query)
             query_vector = np.array(query_embedding)
 
             # Check if query mentions a specific project
@@ -469,11 +530,7 @@ Based on the professional context provided above and the response guidelines, pl
     def search_work_experience(self, query: str, limit: int = 10) -> List[str]:
         """Enhanced search for work experience with detailed accomplishments."""
         try:
-            query_embedding = embedding_model.embed_query(query)
-
-            if isinstance(query_embedding[0], list):
-                query_embedding = query_embedding[0]
-
+            query_embedding = self._get_cached_embedding(query)
             query_vector = np.array(query_embedding)
 
             # Check if query mentions a specific company
